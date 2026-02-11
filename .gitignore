@@ -1,0 +1,31 @@
+# Environment variables
+.env
+.env.local
+.env.*
+*.env
+
+# Dependencies
+node_modules/
+bun.lockb
+
+# Logs
+*.log
+studio.log
+
+# Prisma
+prisma/dev.db
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
