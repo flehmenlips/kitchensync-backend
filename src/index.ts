@@ -13,30 +13,43 @@ import { logger } from "hono/logger";
 const app = new Hono();
 
 // CORS middleware - validates origin against allowlist
-const allowedPatterns = [
+const ALLOWED_ORIGINS = [
+  "https://cookbook.farm",
+  "https://www.cookbook.farm",
+  "https://kitchensync-web.vercel.app",
+];
+
+// Dev patterns with optional port (e.g. http://localhost:5173)
+const devOriginPatterns = [
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https:\/\/cookbook\.farm$/,
-  /^https:\/\/www\.cookbook\.farm$/,
-  /^https:\/\/cook\.farm$/,
-  /^https:\/\/www\.cook\.farm$/,
-  /^https:\/\/[a-z0-9-]+\.vercel\.app$/, // Vercel preview deployments
 ];
+
+// Vercel preview deployments (e.g. kitchensync-web-xxx.vercel.app)
+const vercelPreviewPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/;
+
+function getDynamicOrigins(): string[] {
+  const origins: string[] = [];
+  for (const envKey of ["BACKEND_URL", "RENDER_EXTERNAL_URL"]) {
+    const url = process.env[envKey];
+    if (url) {
+      try {
+        const parsed = new URL(url);
+        origins.push(`${parsed.protocol}//${parsed.host}`);
+      } catch {
+        /* skip invalid URL */
+      }
+    }
+  }
+  return origins;
+}
 
 function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return false;
-  if (allowedPatterns.some((re) => re.test(origin))) return true;
-  // Allow deployed backend URL (e.g. https://api.cookbook.farm)
-  const backendUrl = process.env.BACKEND_URL;
-  if (backendUrl) {
-    try {
-      const url = new URL(backendUrl);
-      const backendOrigin = `${url.protocol}//${url.host}`;
-      if (origin === backendOrigin) return true;
-    } catch {
-      /* ignore */
-    }
-  }
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (devOriginPatterns.some((re) => re.test(origin))) return true;
+  if (vercelPreviewPattern.test(origin)) return true;
+  if (getDynamicOrigins().includes(origin)) return true;
   return false;
 }
 
