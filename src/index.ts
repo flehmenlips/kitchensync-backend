@@ -1,4 +1,3 @@
-import "@vibecodeapp/proxy"; // DO NOT REMOVE OTHERWISE VIBECODE PROXY WILL NOT WORK
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import "./env";
@@ -14,17 +13,37 @@ import { logger } from "hono/logger";
 const app = new Hono();
 
 // CORS middleware - validates origin against allowlist
-const allowed = [
+const allowedPatterns = [
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https:\/\/[a-z0-9-]+\.dev\.vibecode\.run$/,
-  /^https:\/\/[a-z0-9-]+\.vibecode\.run$/,
+  /^https:\/\/cookbook\.farm$/,
+  /^https:\/\/www\.cookbook\.farm$/,
+  /^https:\/\/cook\.farm$/,
+  /^https:\/\/www\.cook\.farm$/,
+  /^https:\/\/[a-z0-9-]+\.vercel\.app$/, // Vercel preview deployments
 ];
+
+function isOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  if (allowedPatterns.some((re) => re.test(origin))) return true;
+  // Allow deployed backend URL (e.g. https://api.cookbook.farm)
+  const backendUrl = process.env.BACKEND_URL;
+  if (backendUrl) {
+    try {
+      const url = new URL(backendUrl);
+      const backendOrigin = `${url.protocol}//${url.host}`;
+      if (origin === backendOrigin) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
+}
 
 app.use(
   "*",
   cors({
-    origin: (origin) => (origin && allowed.some((re) => re.test(origin)) ? origin : null),
+    origin: (origin) => (isOriginAllowed(origin) ? origin : null),
     credentials: true,
   })
 );

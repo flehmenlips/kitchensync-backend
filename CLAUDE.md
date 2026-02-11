@@ -1,60 +1,52 @@
-<stack>
-  Bun runtime, Hono web framework, Zod validation.
-</stack>
+# KitchenSync Backend - Project Guide
 
-<structure>
-  src/index.ts     — App entry, middleware, route mounting
-  src/routes/      — Route modules (create as needed)
-</structure>
+**Tech Stack**: Bun + Hono + Zod + Supabase (PostgreSQL)
 
-<routes>
-  Create routes in src/routes/ and mount them in src/index.ts.
+**Purpose**: This is the shared backend API for the web consoles and iOS mobile app.
 
-  Example route file (src/routes/todos.ts):
-  ```typescript
-  import { Hono } from "hono";
-  import { zValidator } from "@hono/zod-validator";
-  import { z } from "zod";
+## Project Structure
 
-  const todosRouter = new Hono();
+```
+src/
+├── index.ts          → Main Hono app, middleware, route mounting
+├── env.ts            → Environment variable validation (Zod)
+├── supabase.ts       → Supabase client setup
+├── types.ts          → Shared Zod schemas (single source of truth)
+├── routes/
+│   ├── business.ts
+│   ├── reservations.ts
+│   ├── menu.ts
+│   ├── orders.ts
+│   ├── customers.ts
+│   └── analytics.ts
+└── db.ts             → (Optional) Prisma or direct Supabase helpers
+```
 
-  todosRouter.get("/", (c) => {
-    return c.json({ todos: [] });
-  });
+## Key Principles
 
-  todosRouter.post(
-    "/",
-    zValidator("json", z.object({ title: z.string() })),
-    (c) => {
-      const { title } = c.req.valid("json");
-      return c.json({ todo: { id: "1", title } });
-    }
-  );
+- **Supabase is the database** — Use Supabase client for most operations.
+- **All routes** must be prefixed with `/api/` (e.g., `/api/business`, `/api/reservations`).
+- **Shared types**: All API contracts live in `src/types.ts` as Zod schemas.
+- **CORS**: Configured for `cookbook.farm`, `cook.farm`, Vercel previews, and localhost.
+- **Environment**: Load from `.env` using `src/env.ts`.
 
-  export { todosRouter };
-  ```
+## Development Workflow
 
-  Mount in src/index.ts:
-  ```typescript
-  import { todosRouter } from "./routes/todos";
-  app.route("/api/todos", todosRouter);
-  ```
+1. Define or update Zod schemas in `src/types.ts`
+2. Implement backend route in `src/routes/`
+3. Mount the route in `src/index.ts`
+4. Test with cURL: `curl $BACKEND_URL/api/business`
+5. Update frontend and mobile to match the schemas
 
-  IMPORTANT: Make sure all endpoints and routes are prefixed with `/api/`
-</routes>
+## Deployment
 
-<shared_types>
-  Define all API contracts in src/types.ts as Zod schemas.
-  This file is the single source of truth — both backend and frontend import from here.
-</shared_types>
+- **Render.com** (preferred for Bun + Hono)
+- Build command: `bun install`
+- Start command: `bun run src/index.ts`
+- Environment variables: See `.env.example`
 
-<curl_testing>
-  ALWAYS test APIs with cURL after implementing.
-  Use $BACKEND_URL environment variable, never localhost.
-  Verify response matches the Zod schema before telling frontend it's ready.
-</curl_testing>
+## Important Notes
 
-<database>
-  No database is configured by default.
-  If the user needs to persist data or have user accounts, use the database-auth skill and then update this file to reflect the changes.
-</database>
+- Remove any remaining Vibecode references (already mostly cleaned).
+- Keep routes modular and well-documented.
+- Use Supabase Row Level Security (RLS) for data protection.

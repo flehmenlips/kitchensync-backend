@@ -1,0 +1,26 @@
+# KitchenSync Backend - Render.com Blueprint
+# Bun is auto-detected via bun.lock
+
+services:
+  - type: web
+    name: kitchensync-backend
+    runtime: node
+
+    buildCommand: bun install
+    startCommand: bun run src/index.ts
+
+    healthCheckPath: /health
+
+    # Configure secrets in Render Dashboard → Environment
+    # PORT is automatically set by Render for web services
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BACKEND_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

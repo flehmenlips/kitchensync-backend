@@ -17,18 +17,12 @@ fi
 echo "Installing dependencies..."
 bun install
 
-# Generate Prisma client and push schema if prisma is installed (database-auth skill)
+# Generate Prisma client and push schema if prisma is installed
 if [[ -f "prisma/schema.prisma" ]]; then
   echo "Generating Prisma client..."
   bunx prisma generate
   echo "Pushing schema to database..."
   bunx prisma db push --accept-data-loss
-
-  # Enable DB viewer (idempotent, safe to call multiple times)
-  if [[ -n "${VIBECODE_PROJECT_ID:-}" ]]; then
-    echo "Enabling database viewer..."
-    curl -s -X POST "https://api.vibecodeapp.com/api/projects/${VIBECODE_PROJECT_ID}/cloud/db/enable" || true
-  fi
 fi
 
 # Start server based on environment
