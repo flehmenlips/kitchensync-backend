@@ -1,0 +1,617 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User accounts (extends auth users)
+model User {
+  id            String   @id @default(cuid())
+  supabaseUserId String?  @unique  // Links to Supabase Auth user
+  email         String   @unique
+  name          String?
+  avatarUrl     String?
+  accountType   String   @default("consumer") // consumer, business_owner, business_employee, admin, superadmin
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  ownedBusinesses    BusinessAccount[] @relation("BusinessOwner")
+  teamMemberships    BusinessTeamMember[]
+  businessActivityLogs BusinessActivityLog[]
+}
+
+// Business accounts (one per commercial entity)
+model BusinessAccount {
+  id              String   @id @default(cuid())
+  ownerId         String
+  owner           User     @relation("BusinessOwner", fields: [ownerId], references: [id])
+
+  // Business identity
+  businessName    String
+  businessType    String   // restaurant, cafe, farm, farmstand, farmers_market, food_producer, food_store, catering, food_truck
+  slug            String   @unique
+
+  // Contact & Location
+  email           String
+  phone           String?
+  websiteUrl      String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String   @default("US")
+  latitude        Float?
+  longitude       Float?
+
+  // Branding
+  logoUrl         String?
+  coverImageUrl   String?
+  brandColor      String   @default("#000000")
+  description     String?
+
+  // Platform settings
+  subscriptionTier   String @default("starter") // starter, professional, enterprise
+  subscriptionStatus String @default("trialing") // trialing, active, past_due, canceled, paused
+  trialEndsAt        DateTime?
+
+  // Payment processing
+  stripeAccountId     String?
+  stripeAccountStatus String @default("pending")
+  commissionRate      Float  @default(0.05) // 5% default
+
+  // Status
+  isVerified    Boolean  @default(false)
+  verifiedAt    DateTime?
+  isActive      Boolean  @default(true)
+  isFeatured    Boolean  @default(false)
+
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  teamMembers   BusinessTeamMember[]
+  hours         BusinessHours[]
+  activityLogs  BusinessActivityLog[]
+  tables        RestaurantTable[]
+  reservations  Reservation[]
+  reservationSettings ReservationSettings?
+  menuCategories MenuCategory[]
+  orders        Order[]
+  customers     Customer[]
+  loyaltySettings LoyaltySettings?
+}
+
+// Business team members
+model BusinessTeamMember {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  // Role & permissions
+  role        String   @default("staff") // owner, manager, staff, accountant, marketing
+  permissions String   @default("{}") // JSON string for flexibility
+
+  // Status
+  status      String   @default("active") // active, invited, suspended
+  invitedAt   DateTime?
+  joinedAt    DateTime?
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([businessId, userId])
+}
+
+// Business operating hours
+model BusinessHours {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  dayOfWeek   Int      // 0=Sunday, 6=Saturday
+  openTime    String?  // "09:00"
+  closeTime   String?  // "21:00"
+  isClosed    Boolean  @default(false)
+  notes       String?
+
+  @@unique([businessId, dayOfWeek])
+}
+
+// Business activity log (audit trail)
+model BusinessActivityLog {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    BusinessAccount @relation(fields: [businessId], references: [id])
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  action      String   // 'order.confirmed', 'menu.updated', etc.
+  entityType  String?  // 'order', 'reservation', 'menu_item', etc.
+  entityId    String?
+  description String?
+  metadata    String   @default("{}") // JSON string
+
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime @default(now())
+}
+
+// Restaurant tables/seating
+model RestaurantTable {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  tableNumber   String
+  capacityMin   Int      @default(1)
+  capacityMax   Int
+  section       String?  // 'main', 'patio', 'private', 'bar'
+  isActive      Boolean  @default(true)
+
+  // Position for visual layout (optional)
+  positionX     Int?
+  positionY     Int?
+
+  createdAt     DateTime @default(now())
+
+  // Relations
+  reservations  Reservation[]
+  orders        Order[]
+}
+
+// Reservation settings per business
+model ReservationSettings {
+  id            String   @id @default(cuid())
+  businessId    String   @unique
+  business      BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Booking rules
+  minPartySize          Int     @default(1)
+  maxPartySize          Int     @default(20)
+  bookingWindowDays     Int     @default(30)  // How far ahead can book
+  minAdvanceHours       Int     @default(2)   // Minimum notice required
+
+  // Time slots
+  slotDurationMinutes   Int     @default(15)  // Reservation time slots
+  defaultDiningDuration Int     @default(90)  // Minutes
+
+  // Capacity
+  allowWaitlist              Boolean @default(true)
+  maxReservationsPerSlot     Int?
+
+  // Cancellation
+  cancellationPolicy         String?
+  cancellationDeadlineHours  Int     @default(24)
+
+  // Confirmations
+  requireConfirmation   Boolean @default(false)
+  autoConfirm           Boolean @default(true)
+  sendReminders         Boolean @default(true)
+  reminderHoursBefore   Int     @default(24)
+
+  // Deposits (optional)
+  requireDeposit        Boolean @default(false)
+  depositAmount         Float?
+  depositPolicy         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Reservations
+model Reservation {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      BusinessAccount @relation(fields: [businessId], references: [id])
+
+  // Customer info
+  customerUserId    String?  // If linked to a platform user
+  customerName      String
+  customerEmail     String
+  customerPhone     String?
+
+  // Reservation details
+  reservationDate   DateTime  // Date only
+  reservationTime   String    // "18:00" format
+  partySize         Int
+  durationMinutes   Int       @default(90)
+
+  // Table assignment
+  tableId           String?
+  table             RestaurantTable? @relation(fields: [tableId], references: [id])
+  seatingPreference String?   // 'indoor', 'outdoor', 'bar', 'private'
+
+  // Special requests
+  specialRequests   String?
+  occasion          String?   // 'birthday', 'anniversary', 'business', etc.
+
+  // Status tracking
+  status            String    @default("pending")  // pending, confirmed, seated, completed, cancelled, no_show
+  confirmedAt       DateTime?
+  seatedAt          DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  cancellationReason String?
+
+  // Source tracking
+  source            String    @default("app")  // app, website, phone, walk_in, third_party
+
+  // Reminders
+  reminderSentAt     DateTime?
+  confirmationSentAt DateTime?
+
+  // Notes
+  internalNotes     String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// Menu categories
+model MenuCategory {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name          String
+  description   String?
+  imageUrl      String?
+  displayOrder  Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  // Availability
+  availableStartTime String?  // "11:00" - only show during lunch
+  availableEndTime   String?  // "15:00"
+  availableDays      String?  // JSON array of day numbers [1,2,3,4,5]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  items         MenuItem[]
+}
+
+// Menu items
+model MenuItem {
+  id            String   @id @default(cuid())
+  businessId    String
+  categoryId    String
+  category      MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  name          String
+  description   String?
+  imageUrl      String?
+  price         Float
+  displayOrder  Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  // Dietary/allergen info
+  isVegetarian  Boolean  @default(false)
+  isVegan       Boolean  @default(false)
+  isGlutenFree  Boolean  @default(false)
+  containsNuts  Boolean  @default(false)
+  containsDairy Boolean  @default(false)
+  spiceLevel    Int?     // 0-5 scale
+  calories      Int?
+
+  // Availability
+  isAvailable         Boolean  @default(true)
+  unavailableReason   String?
+
+  // Prep time
+  prepTimeMinutes     Int?
+
+  // Tags (JSON array)
+  tags          String?  // ["popular", "chef-special", "seasonal"]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  modifierGroups MenuModifierGroup[]
+}
+
+// Modifier groups (e.g., "Choose your protein", "Add toppings")
+model MenuModifierGroup {
+  id            String   @id @default(cuid())
+  menuItemId    String
+  menuItem      MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  name          String   // "Choose your size", "Add extras"
+  description   String?
+  displayOrder  Int      @default(0)
+
+  // Selection rules
+  isRequired    Boolean  @default(false)
+  minSelections Int      @default(0)
+  maxSelections Int      @default(1)  // 1 = single select, >1 = multi-select
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  modifiers     MenuModifier[]
+}
+
+// Individual modifiers (e.g., "Small", "Medium", "Large")
+model MenuModifier {
+  id              String   @id @default(cuid())
+  modifierGroupId String
+  modifierGroup   MenuModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+
+  name            String
+  priceAdjustment Float    @default(0)  // Can be positive or negative
+  displayOrder    Int      @default(0)
+  isDefault       Boolean  @default(false)
+  isAvailable     Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Orders
+model Order {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      BusinessAccount @relation(fields: [businessId], references: [id])
+
+  // Order number (human-readable, unique per business)
+  orderNumber   String
+
+  // Order type
+  orderType     String   // dine_in, takeout, delivery
+
+  // Customer info
+  customerUserId    String?  // If linked to a platform user
+  customerName      String
+  customerEmail     String?
+  customerPhone     String?
+
+  // Dine-in specific
+  tableId           String?
+  table             RestaurantTable? @relation(fields: [tableId], references: [id])
+  reservationId     String?
+
+  // Delivery specific
+  deliveryAddress   String?
+  deliveryNotes     String?
+  deliveryFee       Float?
+
+  // Takeout/delivery timing
+  scheduledFor      DateTime?  // null = ASAP
+  estimatedReady    DateTime?
+
+  // Pricing
+  subtotal          Float
+  taxAmount         Float     @default(0)
+  tipAmount         Float     @default(0)
+  discountAmount    Float     @default(0)
+  totalAmount       Float
+
+  // Payment
+  paymentStatus     String    @default("pending")  // pending, paid, refunded, failed
+  paymentMethod     String?   // cash, card, online
+  paymentReference  String?   // Stripe payment intent ID, etc.
+  paidAt            DateTime?
+
+  // Order status
+  status            String    @default("pending")  // pending, confirmed, preparing, ready, completed, cancelled
+  confirmedAt       DateTime?
+  preparingAt       DateTime?
+  readyAt           DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  cancellationReason String?
+
+  // Source
+  source            String    @default("pos")  // pos, website, app, phone
+
+  // Notes
+  specialInstructions String?
+  internalNotes     String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  items             OrderItem[]
+
+  @@unique([businessId, orderNumber])
+}
+
+// Order items
+model OrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Menu item reference (may be null if item was deleted)
+  menuItemId    String?
+
+  // Snapshot of item at time of order
+  itemName      String
+  itemPrice     Float    // Base price at time of order
+  quantity      Int
+
+  // Modifiers applied (JSON: [{name, priceAdjustment}])
+  modifiers     String?
+  modifiersTotal Float   @default(0)
+
+  // Item total (itemPrice + modifiersTotal) * quantity
+  totalPrice    Float
+
+  // Special requests for this item
+  specialRequests String?
+
+  // Item status (for kitchen display)
+  status        String   @default("pending")  // pending, preparing, ready, served
+  preparedAt    DateTime?
+  servedAt      DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================
+// Customer CRM
+// ============================================
+
+// Customer profiles per business
+model Customer {
+  id            String   @id @default(cuid())
+  businessId    String
+  business      BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Link to platform user (optional - guests don't have accounts)
+  userId        String?
+
+  // Customer info
+  firstName     String
+  lastName      String
+  email         String?
+  phone         String?
+
+  // Marketing preferences
+  marketingOptIn    Boolean @default(false)
+  smsOptIn          Boolean @default(false)
+
+  // Customer tags (JSON array: ["vip", "regular", "new"])
+  tags              String?
+
+  // Notes
+  internalNotes     String?
+  dietaryRestrictions String?
+  preferences       String?  // JSON: { seatingPreference, favoriteItems, etc. }
+
+  // Stats (denormalized for quick access)
+  totalVisits       Int     @default(0)
+  totalSpent        Float   @default(0)
+  averageSpend      Float   @default(0)
+  lastVisitAt       DateTime?
+
+  // Source
+  source            String  @default("pos")  // pos, reservation, order, manual, import
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  activities    CustomerActivity[]
+  loyaltyPoints LoyaltyPoints?
+
+  @@unique([businessId, email])
+  @@index([businessId, lastName])
+  @@index([businessId, phone])
+}
+
+// Customer activity log (visits, orders, interactions)
+model CustomerActivity {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  businessId    String   // Denormalized for easier querying
+
+  // Activity type
+  activityType  String   // order, reservation, visit, feedback, note, loyalty_earned, loyalty_redeemed
+
+  // References
+  orderId       String?
+  reservationId String?
+
+  // Activity details
+  description   String?
+  amount        Float?   // Order amount, points earned, etc.
+  metadata      String?  // JSON for additional data
+
+  createdAt     DateTime @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([businessId, activityType])
+}
+
+// Loyalty points balance per customer
+model LoyaltyPoints {
+  id            String   @id @default(cuid())
+  customerId    String   @unique
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  businessId    String   // Denormalized for easier querying
+
+  // Current balance
+  pointsBalance Int      @default(0)
+  lifetimeEarned Int     @default(0)
+  lifetimeRedeemed Int   @default(0)
+
+  // Tier (based on lifetime points or spending)
+  tier          String   @default("bronze")  // bronze, silver, gold, platinum
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  transactions  LoyaltyTransaction[]
+
+  @@index([businessId, tier])
+}
+
+// Loyalty points transactions
+model LoyaltyTransaction {
+  id              String   @id @default(cuid())
+  loyaltyPointsId String
+  loyaltyPoints   LoyaltyPoints @relation(fields: [loyaltyPointsId], references: [id], onDelete: Cascade)
+  businessId      String   // Denormalized
+
+  // Transaction details
+  transactionType String   // earned, redeemed, adjusted, expired
+  points          Int      // Positive for earned, negative for redeemed/expired
+  balanceAfter    Int
+
+  // Reference
+  orderId         String?
+  description     String?
+
+  // Staff who processed (for adjustments)
+  processedBy     String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([loyaltyPointsId, createdAt])
+}
+
+// Business loyalty program settings
+model LoyaltySettings {
+  id              String   @id @default(cuid())
+  businessId      String   @unique
+  business        BusinessAccount @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Program status
+  isEnabled       Boolean  @default(false)
+  programName     String   @default("Rewards Program")
+
+  // Earning rules
+  pointsPerDollar Int      @default(1)  // Points earned per dollar spent
+  minimumSpend    Float?   // Minimum spend to earn points
+
+  // Redemption rules
+  pointsPerReward Int      @default(100)  // Points needed for reward
+  rewardValue     Float    @default(5)    // Reward value in dollars
+  maxRedemptionPercent Float @default(50) // Max % of order payable with points
+
+  // Tier thresholds (JSON: { silver: 500, gold: 1000, platinum: 2500 })
+  tierThresholds  String?
+
+  // Expiration
+  pointsExpireDays Int?    // null = never expire
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
