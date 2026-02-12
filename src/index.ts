@@ -8,6 +8,7 @@ import { menuRoutes } from "./routes/menu";
 import { ordersRouter } from "./routes/orders";
 import { customersRouter } from "./routes/customers";
 import { analyticsRouter } from "./routes/analytics";
+import { aiRouter } from "./routes/ai";
 import { logger } from "hono/logger";
 
 const app = new Hono();
@@ -45,7 +46,8 @@ function getDynamicOrigins(): string[] {
 }
 
 function isOriginAllowed(origin: string | null): boolean {
-  if (!origin) return false;
+  // Allow requests with no Origin (e.g. mobile apps, curl, Postman)
+  if (!origin) return true;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   if (devOriginPatterns.some((re) => re.test(origin))) return true;
   if (vercelPreviewPattern.test(origin)) return true;
@@ -56,7 +58,12 @@ function isOriginAllowed(origin: string | null): boolean {
 app.use(
   "*",
   cors({
-    origin: (origin) => (isOriginAllowed(origin) ? origin : null),
+    origin: (origin) => {
+      if (isOriginAllowed(origin)) {
+        return origin ?? "https://kitchensync-backend-2h5n.onrender.com";
+      }
+      return null;
+    },
     credentials: true,
   })
 );
@@ -75,6 +82,7 @@ app.route("/api/menu", menuRoutes);
 app.route("/api/orders", ordersRouter);
 app.route("/api/customers", customersRouter);
 app.route("/api/analytics", analyticsRouter);
+app.route("/api/ai", aiRouter);
 
 const port = Number(process.env.PORT) || 3000;
 

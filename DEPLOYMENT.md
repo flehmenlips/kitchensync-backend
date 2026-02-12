@@ -15,6 +15,7 @@ Deployment targets: **Render** (backend API) + **Vercel** (web consoles). Domain
   - `/api/orders` — Orders
   - `/api/customers` — Customer CRM
   - `/api/analytics` — Analytics
+  - `/api/ai` — AI proxy (recipe generation, parse, menu, prep-list, image) — requires `XAI_API_KEY`
 - **Data**: Supabase (PostgreSQL + Auth) — routes use `@supabase/supabase-js`
 - **Optional**: Prisma + SQLite (`prisma/schema.prisma`, `src/db.ts`) — not used by routes; likely for legacy/studio
 
@@ -33,6 +34,7 @@ Vibecode dependencies and code have been removed. CORS is configured for `cookbo
 | `SUPABASE_URL` | Yes | Supabase project settings |
 | `SUPABASE_ANON_KEY` | Yes | Supabase project settings |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase project settings |
+| `XAI_API_KEY` | Yes (for AI features) | xAI Console — used for recipe/menu/prep-list AI and image generation |
 
 Copy `.env.example` to `.env` locally; configure same vars in Render dashboard.
 
@@ -54,6 +56,7 @@ Copy `.env.example` to `.env` locally; configure same vars in Render dashboard.
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `XAI_API_KEY` (for mobile AI recipe/menu/prep-list/image features)
    - `NODE_ENV` = `production`
 
 5. **Custom domain** (after DNS):
