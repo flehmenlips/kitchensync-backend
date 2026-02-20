@@ -5,74 +5,53 @@ import {
   UpdateOrderSchema,
   UpdateOrderItemStatusSchema,
 } from '../types';
+import { toCamelCase, parseJsonField } from '../utils';
 
 const ordersRouter = new Hono();
 
-// Helper to convert snake_case to camelCase
-function snakeToCamel(str: string): string {
-  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+function parseOrderItemFields(item: Record<string, unknown>): Record<string, unknown> {
+  if (item.modifiers && typeof item.modifiers === 'string') {
+    item.modifiers = parseJsonField(item.modifiers);
+  }
+  return item;
 }
 
-// Helper to convert camelCase to snake_case
-function camelToSnake(str: string): string {
-  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
-
-// Convert object keys from snake_case to camelCase
-function toCamelCase<T>(obj: any): T {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => toCamelCase(item)) as T;
-  }
-  if (typeof obj === 'object') {
-    const newObj: any = {};
-    for (const key in obj) {
-      const camelKey = snakeToCamel(key);
-      newObj[camelKey] = toCamelCase(obj[key]);
-    }
-    return newObj as T;
-  }
-  return obj;
-}
-
-// Convert object keys from camelCase to snake_case for Supabase insert/update
-function toSnakeCase(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => toSnakeCase(item));
-  }
-  if (typeof obj === 'object') {
-    const newObj: any = {};
-    for (const key in obj) {
-      const snakeKey = camelToSnake(key);
-      newObj[snakeKey] = toSnakeCase(obj[key]);
-    }
-    return newObj;
-  }
-  return obj;
-}
-
-// Helper to generate order number
-async function generateOrderNumber(businessId: string): Promise<string> {
+/**
+ * Generates a unique order number with retry logic to handle race conditions.
+ * Uses optimistic generation with conflict detection on retry.
+ */
+async function generateOrderNumber(businessId: string, maxRetries = 3): Promise<string> {
   const today = new Date();
   const datePrefix = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
 
-  // Get count of orders for today
   const startOfDay = new Date(today);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(today);
   endOfDay.setHours(23, 59, 59, 999);
 
-  const { count, error } = await supabase
-    .from('orders')
-    .select('*', { count: 'exact', head: true })
-    .eq('business_id', businessId)
-    .gte('created_at', startOfDay.toISOString())
-    .lte('created_at', endOfDay.toISOString());
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const { count } = await supabase
+      .from('orders')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .gte('created_at', startOfDay.toISOString())
+      .lte('created_at', endOfDay.toISOString());
 
-  const orderCount = count || 0;
+    const orderNumber = `${datePrefix}-${String((count || 0) + 1 + attempt).padStart(4, '0')}`;
 
-  return `${datePrefix}-${String(orderCount + 1).padStart(4, '0')}`;
+    const { count: existingCount } = await supabase
+      .from('orders')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .eq('order_number', orderNumber);
+
+    if (!existingCount || existingCount === 0) {
+      return orderNumber;
+    }
+  }
+
+  const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${datePrefix}-${randomSuffix}`;
 }
 
 // Helper to award loyalty points for completed orders
@@ -331,7 +310,7 @@ ordersRouter.get('/:businessId', async (c) => {
         if (!itemsMap.has(item.order_id)) {
           itemsMap.set(item.order_id, []);
         }
-        itemsMap.get(item.order_id)!.push(toCamelCase(item));
+        itemsMap.get(item.order_id)!.push(parseOrderItemFields(toCamelCase(item)));
       }
     }
   }
@@ -393,7 +372,7 @@ ordersRouter.get('/:businessId/:orderId', async (c) => {
 
   const camelOrder = toCamelCase<any>(order);
   camelOrder.table = table;
-  camelOrder.items = toCamelCase(items || []);
+  camelOrder.items = (items || []).map((i: any) => parseOrderItemFields(toCamelCase(i)));
 
   return c.json({ data: camelOrder });
 });
@@ -408,10 +387,9 @@ ordersRouter.post('/:businessId', async (c) => {
     return c.json({ error: { message: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.issues } }, 400);
   }
 
-  // Verify business exists
   const { data: business, error: bizError } = await supabase
     .from('business_accounts')
-    .select('id')
+    .select('id, tax_rate, delivery_fee')
     .eq('id', businessId)
     .single();
 
@@ -496,11 +474,10 @@ ordersRouter.post('/:businessId', async (c) => {
     });
   }
 
-  // Calculate totals
-  const taxRate = 0.08; // 8% tax - could be configurable per business
+  const taxRate = business.tax_rate ?? 0.08;
   const taxAmount = subtotal * taxRate;
   const tipAmount = parsed.data.tipAmount || 0;
-  const deliveryFee = parsed.data.orderType === 'delivery' ? 5.00 : 0; // Could be configurable
+  const deliveryFee = parsed.data.orderType === 'delivery' ? (business.delivery_fee ?? 5.00) : 0;
   const totalAmount = subtotal + taxAmount + tipAmount + deliveryFee;
 
   // Generate order number
@@ -568,7 +545,7 @@ ordersRouter.post('/:businessId', async (c) => {
 
   const camelOrder = toCamelCase<any>(order);
   camelOrder.table = table;
-  camelOrder.items = toCamelCase(items || []);
+  camelOrder.items = (items || []).map((i: any) => parseOrderItemFields(toCamelCase(i)));
 
   return c.json({ data: camelOrder }, 201);
 });
@@ -678,7 +655,7 @@ ordersRouter.put('/:businessId/:orderId', async (c) => {
 
   const camelOrder = toCamelCase<any>(order);
   camelOrder.table = table;
-  camelOrder.items = toCamelCase(items || []);
+  camelOrder.items = (items || []).map((i: any) => parseOrderItemFields(toCamelCase(i)));
 
   return c.json({ data: camelOrder });
 });
@@ -772,7 +749,7 @@ ordersRouter.put('/:businessId/:orderId/status', async (c) => {
 
   const camelOrder = toCamelCase<any>(order);
   camelOrder.table = table;
-  camelOrder.items = toCamelCase(items || []);
+  camelOrder.items = (items || []).map((i: any) => parseOrderItemFields(toCamelCase(i)));
 
   return c.json({ data: camelOrder });
 });

@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { supabase } from '../supabase';
+import { toCamelCase } from '../utils';
 
 const analyticsRouter = new Hono();
 
-// Helper to get date ranges
 function getDateRanges() {
   const now = new Date();
 
@@ -35,21 +35,6 @@ function getDateRanges() {
     monthStart,
     thirtyDaysAgo,
   };
-}
-
-// Helper to convert snake_case to camelCase
-function snakeToCamel(str: string): string {
-  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-}
-
-// Helper to convert object keys from snake_case to camelCase
-function convertKeysToCamel<T>(obj: Record<string, unknown>): T {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const camelKey = snakeToCamel(key);
-    result[camelKey] = obj[key];
-  }
-  return result as T;
 }
 
 // ============================================

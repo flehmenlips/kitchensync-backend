@@ -1,16 +1,10 @@
-// Supabase client for backend operations
 import { createClient } from "@supabase/supabase-js";
+import { env } from "./env";
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseUrl = env.SUPABASE_URL;
+const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = env.SUPABASE_ANON_KEY;
 
-if (!supabaseUrl) {
-  throw new Error("Missing SUPABASE_URL environment variable");
-}
-
-// Prefer service role key for server-side operations (bypasses RLS)
-// Fall back to anon key if service role not available
 const apiKey = supabaseServiceRoleKey || supabaseAnonKey;
 
 if (!apiKey) {

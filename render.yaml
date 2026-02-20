@@ -4,7 +4,6 @@
 services:
   - type: web
     name: kitchensync-backend
-    runtime: node
 
     buildCommand: bun install
     startCommand: bun run src/index.ts
@@ -23,4 +22,6 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: XAI_API_KEY
         sync: false

@@ -9,36 +9,19 @@ import {
   DeleteBusinessSchema
 } from '../types';
 import { z } from 'zod';
+import { toCamelCase } from '../utils';
+import type { AuthUser } from '../middleware/auth';
 
-export const businessRouter = new Hono();
+type Env = { Variables: { user: AuthUser } };
 
-// Helper to generate slug from business name
+export const businessRouter = new Hono<Env>();
+
 function generateSlug(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     + '-' + Math.random().toString(36).substring(2, 6);
-}
-
-// Helper to convert snake_case to camelCase for response
-function toCamelCase<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    result[camelKey] = obj[key];
-  }
-  return result;
-}
-
-// Helper to convert camelCase to snake_case for database
-function toSnakeCase<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
-    result[snakeKey] = obj[key];
-  }
-  return result;
 }
 
 // Map business_accounts row to camelCase response
@@ -123,9 +106,8 @@ businessRouter.post(
     const data = c.req.valid('json');
 
     try {
-      // The supabaseUserId from the request IS the owner_user_id in business_accounts
-      // We don't create users - Supabase Auth handles that
-      const ownerUserId = data.supabaseUserId;
+      const user = c.get('user') as AuthUser;
+      const ownerUserId = user.id;
 
       // Generate unique slug
       const slug = generateSlug(data.businessName);
@@ -224,36 +206,42 @@ businessRouter.post(
   }
 );
 
-// Get businesses for a specific user (by Supabase user ID)
+// Get businesses for the authenticated user
 // Returns businesses where user is owner OR team member
-businessRouter.get('/user/:supabaseUserId', async (c) => {
-  const supabaseUserId = c.req.param('supabaseUserId');
+businessRouter.get('/user/me', async (c) => {
+  const user = c.get('user') as AuthUser;
+  const supabaseUserId = user.id;
 
   try {
-    // Find all team memberships for this user
-    const { data: teamMemberships, error: teamError } = await supabase
-      .from('business_team_members')
-      .select(`
-        role,
-        status,
-        business_id
-      `)
-      .eq('user_id', supabaseUserId)
-      .eq('status', 'active');
+    // Fetch team memberships and owned businesses in parallel
+    const [teamResult, ownedResult] = await Promise.all([
+      supabase
+        .from('business_team_members')
+        .select('role, status, business_id')
+        .eq('user_id', supabaseUserId)
+        .eq('status', 'active'),
+      supabase
+        .from('business_accounts')
+        .select('id')
+        .eq('owner_user_id', supabaseUserId),
+    ]);
 
-    if (teamError) {
-      console.error('Error fetching team memberships:', teamError);
+    if (teamResult.error) {
+      console.error('Error fetching team memberships:', teamResult.error);
       return c.json({ error: { message: 'Failed to fetch businesses', code: 'FETCH_FAILED' } }, 500);
     }
 
-    if (!teamMemberships || teamMemberships.length === 0) {
+    const teamMemberships = teamResult.data || [];
+    const ownedBusinessIds = (ownedResult.data || []).map(b => b.id);
+
+    // Merge business IDs from both sources (deduplicated)
+    const teamBusinessIds = teamMemberships.map(tm => tm.business_id);
+    const allBusinessIds = [...new Set([...teamBusinessIds, ...ownedBusinessIds])];
+
+    if (allBusinessIds.length === 0) {
       return c.json({ data: [] });
     }
 
-    // Get the business IDs
-    const businessIds = teamMemberships.map(tm => tm.business_id);
-
-    // Fetch business details
     const { data: businesses, error: businessError } = await supabase
       .from('business_accounts')
       .select(`
@@ -268,16 +256,16 @@ businessRouter.get('/user/:supabaseUserId', async (c) => {
         is_active,
         created_at
       `)
-      .in('id', businessIds);
+      .in('id', allBusinessIds);
 
     if (businessError) {
       console.error('Error fetching businesses:', businessError);
       return c.json({ error: { message: 'Failed to fetch businesses', code: 'FETCH_FAILED' } }, 500);
     }
 
-    // Map businesses with role info
     const result = (businesses || []).map(b => {
       const membership = teamMemberships.find(tm => tm.business_id === b.id);
+      const isOwner = ownedBusinessIds.includes(b.id);
       return {
         id: b.id,
         businessName: b.business_name,
@@ -289,7 +277,7 @@ businessRouter.get('/user/:supabaseUserId', async (c) => {
         isVerified: b.is_verified,
         isActive: b.is_active,
         createdAt: b.created_at,
-        role: membership?.role,
+        role: membership?.role || (isOwner ? 'owner' : null),
       };
     });
 
@@ -426,6 +414,8 @@ businessRouter.put(
       if (data.city !== undefined) updateData.city = data.city;
       if (data.state !== undefined) updateData.state = data.state;
       if (data.postalCode !== undefined) updateData.postal_code = data.postalCode;
+      if (data.taxRate !== undefined) updateData.tax_rate = data.taxRate;
+      if (data.deliveryFee !== undefined) updateData.delivery_fee = data.deliveryFee;
 
       const { data: business, error } = await supabase
         .from('business_accounts')
@@ -652,9 +642,7 @@ businessRouter.post(
   }
 );
 
-// Verify a business (admin only)
 const VerifyBusinessSchema = z.object({
-  adminId: z.string().uuid(),
   notes: z.string().optional(),
 });
 
@@ -663,7 +651,9 @@ businessRouter.put(
   zValidator('json', VerifyBusinessSchema),
   async (c) => {
     const businessId = c.req.param('id');
-    const { adminId, notes } = c.req.valid('json');
+    const user = c.get('user') as AuthUser;
+    const adminId = user.id;
+    const { notes } = c.req.valid('json');
 
     try {
       // Update business verification status
@@ -701,9 +691,7 @@ businessRouter.put(
   }
 );
 
-// Reject/unverify a business (admin only)
 const RejectBusinessSchema = z.object({
-  adminId: z.string().uuid(),
   reason: z.string().min(1, 'Rejection reason is required'),
 });
 
@@ -712,7 +700,9 @@ businessRouter.put(
   zValidator('json', RejectBusinessSchema),
   async (c) => {
     const businessId = c.req.param('id');
-    const { adminId, reason } = c.req.valid('json');
+    const user = c.get('user') as AuthUser;
+    const adminId = user.id;
+    const { reason } = c.req.valid('json');
 
     try {
       // Update business verification status
@@ -750,9 +740,7 @@ businessRouter.put(
   }
 );
 
-// Activate/Deactivate a business (admin only)
 const ToggleActiveSchema = z.object({
-  adminId: z.string().uuid(),
   isActive: z.boolean(),
   reason: z.string().optional(),
 });
@@ -762,7 +750,9 @@ businessRouter.put(
   zValidator('json', ToggleActiveSchema),
   async (c) => {
     const businessId = c.req.param('id');
-    const { adminId, isActive, reason } = c.req.valid('json');
+    const user = c.get('user') as AuthUser;
+    const adminId = user.id;
+    const { isActive, reason } = c.req.valid('json');
 
     try {
       // Update business active status
@@ -807,20 +797,7 @@ businessRouter.put(
     const hours = c.req.valid('json');
 
     try {
-      // Delete existing hours
-      const { error: deleteError } = await supabase
-        .from('business_hours')
-        .delete()
-        .eq('business_id', businessId);
-
-      if (deleteError) {
-        console.error('Error deleting existing hours:', deleteError);
-        return c.json({ error: { message: 'Failed to update hours', code: 'UPDATE_FAILED' } }, 500);
-      }
-
-      // Insert new hours
-      const hoursToInsert = hours.map(h => ({
-        business_id: businessId,
+      const hoursData = hours.map(h => ({
         day_of_week: h.dayOfWeek,
         open_time: h.openTime || null,
         close_time: h.closeTime || null,
@@ -828,12 +805,13 @@ businessRouter.put(
         notes: h.notes || null,
       }));
 
-      const { error: insertError } = await supabase
-        .from('business_hours')
-        .insert(hoursToInsert);
+      const { error: rpcError } = await supabase.rpc('update_business_hours', {
+        p_business_id: businessId,
+        p_hours: hoursData,
+      });
 
-      if (insertError) {
-        console.error('Error inserting hours:', insertError);
+      if (rpcError) {
+        console.error('Error updating hours via RPC:', rpcError);
         return c.json({ error: { message: 'Failed to update hours', code: 'UPDATE_FAILED' } }, 500);
       }
 
@@ -935,14 +913,15 @@ businessRouter.get('/:id/related-counts', async (c) => {
   }
 });
 
-// Delete a business (admin only)
 businessRouter.delete(
   '/:id',
   zValidator('json', DeleteBusinessSchema),
   async (c) => {
     const businessId = c.req.param('id');
     const hardDelete = c.req.query('hard') === 'true';
-    const { adminId, reason } = c.req.valid('json');
+    const user = c.get('user') as AuthUser;
+    const adminId = user.id;
+    const { reason } = c.req.valid('json');
 
     try {
       // First check if the admin is a superadmin

@@ -10,51 +10,22 @@ import {
   CreateModifierSchema,
   UpdateModifierSchema,
 } from '../types';
+import { toCamelCase, parseJsonField } from '../utils';
 
 const menuRoutes = new Hono();
 
-// Helper to convert snake_case to camelCase
-function snakeToCamel(str: string): string {
-  return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+function parseMenuItemFields(item: Record<string, unknown>): Record<string, unknown> {
+  if (item.tags && typeof item.tags === 'string') {
+    item.tags = parseJsonField<string[]>(item.tags);
+  }
+  return item;
 }
 
-// Helper to convert camelCase to snake_case
-function camelToSnake(str: string): string {
-  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
-
-// Convert object keys from snake_case to camelCase
-function toCamelCase<T>(obj: any): T {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => toCamelCase(item)) as T;
+function parseCategoryFields(cat: Record<string, unknown>): Record<string, unknown> {
+  if (cat.availableDays && typeof cat.availableDays === 'string') {
+    cat.availableDays = parseJsonField<number[]>(cat.availableDays);
   }
-  if (typeof obj === 'object') {
-    const newObj: any = {};
-    for (const key in obj) {
-      const camelKey = snakeToCamel(key);
-      newObj[camelKey] = toCamelCase(obj[key]);
-    }
-    return newObj as T;
-  }
-  return obj;
-}
-
-// Convert object keys from camelCase to snake_case for Supabase insert/update
-function toSnakeCase(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => toSnakeCase(item));
-  }
-  if (typeof obj === 'object') {
-    const newObj: any = {};
-    for (const key in obj) {
-      const snakeKey = camelToSnake(key);
-      newObj[snakeKey] = toSnakeCase(obj[key]);
-    }
-    return newObj;
-  }
-  return obj;
+  return cat;
 }
 
 // ============================================
@@ -152,13 +123,13 @@ menuRoutes.get('/:businessId/categories', async (c) => {
     if (!itemsByCategory.has(catId)) {
       itemsByCategory.set(catId, []);
     }
-    const camelItem = toCamelCase<any>(item);
+    const camelItem = parseMenuItemFields(toCamelCase<any>(item));
     camelItem.modifierGroups = groupsByItem.get(item.id) || [];
     itemsByCategory.get(catId)!.push(camelItem);
   }
 
   const result = (categories || []).map((cat) => {
-    const camelCat = toCamelCase<any>(cat);
+    const camelCat = parseCategoryFields(toCamelCase<any>(cat));
     camelCat.items = itemsByCategory.get(cat.id) || [];
     return camelCat;
   });
@@ -166,7 +137,6 @@ menuRoutes.get('/:businessId/categories', async (c) => {
   return c.json({ data: result });
 });
 
-// Get single category
 menuRoutes.get('/:businessId/categories/:categoryId', async (c) => {
   const { businessId, categoryId } = c.req.param();
 
@@ -188,13 +158,12 @@ menuRoutes.get('/:businessId/categories/:categoryId', async (c) => {
     .eq('category_id', categoryId)
     .order('display_order', { ascending: true });
 
-  const camelCategory = toCamelCase<any>(category);
-  camelCategory.items = toCamelCase(items || []);
+  const camelCategory = parseCategoryFields(toCamelCase<any>(category));
+  camelCategory.items = (items || []).map((i: any) => parseMenuItemFields(toCamelCase<any>(i)));
 
   return c.json({ data: camelCategory });
 });
 
-// Create category
 menuRoutes.post('/:businessId/categories', async (c) => {
   const { businessId } = c.req.param();
   const body = await c.req.json();
@@ -248,10 +217,9 @@ menuRoutes.post('/:businessId/categories', async (c) => {
     return c.json({ error: { message: error.message, code: 'DB_ERROR' } }, 500);
   }
 
-  return c.json({ data: toCamelCase(category) }, 201);
+  return c.json({ data: parseCategoryFields(toCamelCase(category)) }, 201);
 });
 
-// Update category
 menuRoutes.put('/:businessId/categories/:categoryId', async (c) => {
   const { businessId, categoryId } = c.req.param();
   const body = await c.req.json();
@@ -296,10 +264,9 @@ menuRoutes.put('/:businessId/categories/:categoryId', async (c) => {
     return c.json({ error: { message: error.message, code: 'DB_ERROR' } }, 500);
   }
 
-  return c.json({ data: toCamelCase(category) });
+  return c.json({ data: parseCategoryFields(toCamelCase(category)) });
 });
 
-// Delete category
 menuRoutes.delete('/:businessId/categories/:categoryId', async (c) => {
   const { businessId, categoryId } = c.req.param();
 
@@ -433,7 +400,7 @@ menuRoutes.get('/:businessId/items', async (c) => {
   }
 
   const result = (items || []).map((item) => {
-    const camelItem = toCamelCase<any>(item);
+    const camelItem = parseMenuItemFields(toCamelCase<any>(item));
     camelItem.category = categoryMap.get(item.category_id) || null;
     camelItem.modifierGroups = groupsByItem.get(item.id) || [];
     return camelItem;
@@ -442,7 +409,6 @@ menuRoutes.get('/:businessId/items', async (c) => {
   return c.json({ data: result });
 });
 
-// Get single item
 menuRoutes.get('/:businessId/items/:itemId', async (c) => {
   const { businessId, itemId } = c.req.param();
 
@@ -493,9 +459,9 @@ menuRoutes.get('/:businessId/items/:itemId', async (c) => {
     modifiersByGroup.get(groupId)!.push(toCamelCase(mod));
   }
 
-  const camelItem = toCamelCase<any>(item);
+  const camelItem = parseMenuItemFields(toCamelCase<any>(item));
   camelItem.category = category ? toCamelCase(category) : null;
-  camelItem.modifierGroups = (modifierGroups || []).map((group) => {
+  camelItem.modifierGroups = (modifierGroups || []).map((group: any) => {
     const camelGroup = toCamelCase<any>(group);
     camelGroup.modifiers = modifiersByGroup.get(group.id) || [];
     return camelGroup;
@@ -504,7 +470,6 @@ menuRoutes.get('/:businessId/items/:itemId', async (c) => {
   return c.json({ data: camelItem });
 });
 
-// Create item
 menuRoutes.post('/:businessId/items', async (c) => {
   const { businessId } = c.req.param();
   const body = await c.req.json();
@@ -567,13 +532,12 @@ menuRoutes.post('/:businessId/items', async (c) => {
     return c.json({ error: { message: error.message, code: 'DB_ERROR' } }, 500);
   }
 
-  const camelItem = toCamelCase<any>(item);
+  const camelItem = parseMenuItemFields(toCamelCase<any>(item));
   camelItem.category = toCamelCase(category);
 
   return c.json({ data: camelItem }, 201);
 });
 
-// Update item
 menuRoutes.put('/:businessId/items/:itemId', async (c) => {
   const { businessId, itemId } = c.req.param();
   const body = await c.req.json();
@@ -677,9 +641,9 @@ menuRoutes.put('/:businessId/items/:itemId', async (c) => {
     modifiersByGroup.get(groupId)!.push(toCamelCase(mod));
   }
 
-  const camelItem = toCamelCase<any>(item);
+  const camelItem = parseMenuItemFields(toCamelCase<any>(item));
   camelItem.category = category ? toCamelCase(category) : null;
-  camelItem.modifierGroups = (modifierGroups || []).map((group) => {
+  camelItem.modifierGroups = (modifierGroups || []).map((group: any) => {
     const camelGroup = toCamelCase<any>(group);
     camelGroup.modifiers = modifiersByGroup.get(group.id) || [];
     return camelGroup;
@@ -688,7 +652,6 @@ menuRoutes.put('/:businessId/items/:itemId', async (c) => {
   return c.json({ data: camelItem });
 });
 
-// Delete item
 menuRoutes.delete('/:businessId/items/:itemId', async (c) => {
   const { businessId, itemId } = c.req.param();
 
@@ -1128,13 +1091,13 @@ menuRoutes.get('/:businessId/public', async (c) => {
     if (!itemsByCategory.has(catId)) {
       itemsByCategory.set(catId, []);
     }
-    const camelItem = toCamelCase<any>(item);
+    const camelItem = parseMenuItemFields(toCamelCase<any>(item));
     camelItem.modifierGroups = groupsByItem.get(item.id) || [];
     itemsByCategory.get(catId)!.push(camelItem);
   }
 
   const resultCategories = (categories || []).map((cat) => {
-    const camelCat = toCamelCase<any>(cat);
+    const camelCat = parseCategoryFields(toCamelCase<any>(cat));
     camelCat.items = itemsByCategory.get(cat.id) || [];
     return camelCat;
   });

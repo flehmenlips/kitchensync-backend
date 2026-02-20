@@ -9,6 +9,10 @@ const envSchema = z.object({
   PORT: z.string().optional().default("3000"),
   NODE_ENV: z.string().optional(),
   BACKEND_URL: z.url("BACKEND_URL must be a valid URL").default("http://localhost:3000"),
+  // Supabase
+  SUPABASE_URL: z.url("SUPABASE_URL must be a valid URL"),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
   // AI (optional - required for /api/ai routes)
   XAI_API_KEY: z.string().optional(),
 });

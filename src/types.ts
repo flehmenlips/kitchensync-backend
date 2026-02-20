@@ -15,18 +15,15 @@ export const BusinessTypeSchema = z.enum([
 
 export type BusinessType = z.infer<typeof BusinessTypeSchema>;
 
-// Business registration request
+// Business registration request (supabaseUserId derived from auth token)
 export const RegisterBusinessSchema = z.object({
   businessName: z.string().min(2).max(100),
   businessType: BusinessTypeSchema,
   email: z.string().email(),
   phone: z.string().optional(),
   description: z.string().max(500).optional(),
-  // Owner info
   ownerName: z.string().min(2),
   ownerEmail: z.string().email(),
-  // Supabase Auth user ID (links to authenticated user)
-  supabaseUserId: z.string(),
 });
 
 export type RegisterBusinessRequest = z.infer<typeof RegisterBusinessSchema>;
@@ -67,6 +64,8 @@ export const UpdateBusinessSchema = z.object({
   logoUrl: z.string().url().optional(),
   coverImageUrl: z.string().url().optional(),
   brandColor: z.string().optional(),
+  taxRate: z.number().min(0).max(1).optional(),
+  deliveryFee: z.number().min(0).optional(),
 });
 
 export type UpdateBusinessRequest = z.infer<typeof UpdateBusinessSchema>;
@@ -402,7 +401,7 @@ export const MenuCategoryResponseSchema = z.object({
   isActive: z.boolean(),
   availableStartTime: z.string().nullable(),
   availableEndTime: z.string().nullable(),
-  availableDays: z.string().nullable(),
+  availableDays: z.array(z.number()).nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -460,7 +459,7 @@ export const MenuItemResponseSchema = z.object({
   isAvailable: z.boolean(),
   unavailableReason: z.string().nullable(),
   prepTimeMinutes: z.number().nullable(),
-  tags: z.string().nullable(),
+  tags: z.array(z.string()).nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -656,7 +655,7 @@ export const OrderItemResponseSchema = z.object({
   itemName: z.string(),
   itemPrice: z.number(),
   quantity: z.number(),
-  modifiers: z.string().nullable(),
+  modifiers: z.array(OrderItemModifierSchema).nullable(),
   modifiersTotal: z.number(),
   totalPrice: z.number(),
   specialRequests: z.string().nullable(),
@@ -771,10 +770,10 @@ export const CustomerResponseSchema = z.object({
   phone: z.string().nullable(),
   marketingOptIn: z.boolean(),
   smsOptIn: z.boolean(),
-  tags: z.string().nullable(),
+  tags: z.array(z.string()).nullable(),
   internalNotes: z.string().nullable(),
   dietaryRestrictions: z.string().nullable(),
-  preferences: z.string().nullable(),
+  preferences: z.record(z.string(), z.unknown()).nullable(),
   totalVisits: z.number(),
   totalSpent: z.number(),
   averageSpend: z.number(),
@@ -807,7 +806,7 @@ export const CustomerListItemSchema = z.object({
   lastName: z.string(),
   email: z.string().nullable(),
   phone: z.string().nullable(),
-  tags: z.string().nullable(),
+  tags: z.array(z.string()).nullable(),
   totalVisits: z.number(),
   totalSpent: z.number(),
   lastVisitAt: z.string().nullable(),
@@ -852,7 +851,7 @@ export const CustomerActivityResponseSchema = z.object({
   reservationId: z.string().nullable(),
   description: z.string().nullable(),
   amount: z.number().nullable(),
-  metadata: z.string().nullable(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
   createdAt: z.string(),
 });
 
@@ -921,7 +920,7 @@ export const LoyaltySettingsResponseSchema = z.object({
   pointsPerReward: z.number(),
   rewardValue: z.number(),
   maxRedemptionPercent: z.number(),
-  tierThresholds: z.string().nullable(),
+  tierThresholds: z.record(z.string(), z.number()).nullable(),
   pointsExpireDays: z.number().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -1116,9 +1115,8 @@ export type AnalyticsDashboard = z.infer<typeof AnalyticsDashboardSchema>;
 // Business Delete Schemas
 // ============================================
 
-// Delete business request
+// Delete business request (adminId derived from auth token)
 export const DeleteBusinessSchema = z.object({
-  adminId: z.string().uuid(),
   reason: z.string().optional(),
 });
 

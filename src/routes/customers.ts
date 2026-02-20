@@ -7,33 +7,24 @@ import {
   AdjustLoyaltyPointsSchema,
   RedeemLoyaltyPointsSchema,
   UpdateLoyaltySettingsSchema,
+  CustomerSourceSchema,
 } from '../types';
+import { z } from 'zod';
+import { toCamelCase, parseJsonField } from '../utils';
 
 const customersRouter = new Hono();
 
-// Helper function to convert snake_case to camelCase
-function toCamelCase<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    const value = obj[key];
-    if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-      result[camelKey] = toCamelCase(value as Record<string, unknown>);
-    } else {
-      result[camelKey] = value;
-    }
+function parseCustomerFields(obj: Record<string, unknown>): Record<string, unknown> {
+  if (obj.tags && typeof obj.tags === 'string') {
+    obj.tags = parseJsonField<string[]>(obj.tags);
   }
-  return result;
-}
-
-// Helper function to convert camelCase to snake_case
-function toSnakeCase(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-    result[snakeKey] = obj[key];
+  if (obj.preferences && typeof obj.preferences === 'string') {
+    obj.preferences = parseJsonField(obj.preferences);
   }
-  return result;
+  if (obj.metadata && typeof obj.metadata === 'string') {
+    obj.metadata = parseJsonField(obj.metadata);
+  }
+  return obj;
 }
 
 // ============================================
@@ -103,7 +94,7 @@ customersRouter.get('/:businessId', async (c) => {
       lastName: customer.last_name,
       email: customer.email,
       phone: customer.phone,
-      tags: customer.tags,
+      tags: typeof customer.tags === 'string' ? parseJsonField<string[]>(customer.tags) : customer.tags,
       totalVisits: customer.total_visits,
       totalSpent: customer.total_spent,
       lastVisitAt: customer.last_visit_at || null,
@@ -139,12 +130,11 @@ customersRouter.get('/:businessId/:customerId', async (c) => {
     return c.json({ error: { message: 'Customer not found', code: 'NOT_FOUND' } }, 404);
   }
 
-  // Transform to camelCase
   const loyaltyPoints = customer.loyalty_points ? toCamelCase(customer.loyalty_points as Record<string, unknown>) : null;
-  const transformed = {
+  const transformed = parseCustomerFields({
     ...toCamelCase(customer),
     loyaltyPoints,
-  };
+  });
 
   return c.json({ data: transformed });
 });
@@ -230,7 +220,7 @@ customersRouter.post('/:businessId', async (c) => {
     .eq('id', customer.id)
     .single();
 
-  const transformed = toCamelCase(customerWithLoyalty || customer);
+  const transformed = parseCustomerFields(toCamelCase(customerWithLoyalty || customer));
   if (customerWithLoyalty?.loyalty_points) {
     (transformed as Record<string, unknown>).loyaltyPoints = toCamelCase(customerWithLoyalty.loyalty_points as Record<string, unknown>);
   }
@@ -297,7 +287,7 @@ customersRouter.put('/:businessId/:customerId', async (c) => {
     return c.json({ error: { message: updateError?.message || 'Failed to update customer', code: 'DATABASE_ERROR' } }, 500);
   }
 
-  const transformed = toCamelCase(customer);
+  const transformed = parseCustomerFields(toCamelCase(customer));
   if (customer.loyalty_points) {
     (transformed as Record<string, unknown>).loyaltyPoints = toCamelCase(customer.loyalty_points as Record<string, unknown>);
   }
@@ -305,7 +295,6 @@ customersRouter.put('/:businessId/:customerId', async (c) => {
   return c.json({ data: transformed });
 });
 
-// Delete customer
 customersRouter.delete('/:businessId/:customerId', async (c) => {
   const { businessId, customerId } = c.req.param();
 
@@ -329,7 +318,7 @@ customersRouter.delete('/:businessId/:customerId', async (c) => {
     return c.json({ error: { message: deleteError.message, code: 'DATABASE_ERROR' } }, 500);
   }
 
-  return c.json({ data: { success: true } });
+  return c.body(null, 204);
 });
 
 // ============================================
@@ -372,7 +361,7 @@ customersRouter.get('/:businessId/:customerId/activities', async (c) => {
     return c.json({ error: { message: error.message, code: 'DATABASE_ERROR' } }, 500);
   }
 
-  const transformedActivities = (activities || []).map((a: Record<string, unknown>) => toCamelCase(a));
+  const transformedActivities = (activities || []).map((a: Record<string, unknown>) => parseCustomerFields(toCamelCase(a)));
 
   return c.json({
     data: transformedActivities,
@@ -894,12 +883,24 @@ customersRouter.get('/:businessId/stats/summary', async (c) => {
 // Find or Create Customer (for orders/reservations)
 // ============================================
 
-// Find or create customer by email/phone
+const FindOrCreateCustomerSchema = z.object({
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  source: CustomerSourceSchema.optional(),
+});
+
 customersRouter.post('/:businessId/find-or-create', async (c) => {
   const { businessId } = c.req.param();
   const body = await c.req.json();
 
-  const { email, phone, firstName, lastName, source } = body;
+  const parsed = FindOrCreateCustomerSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: { message: 'Invalid request', code: 'VALIDATION_ERROR', details: parsed.error.issues } }, 400);
+  }
+
+  const { email, phone, firstName, lastName, source } = parsed.data;
 
   if (!email && !phone) {
     return c.json({ error: { message: 'Email or phone required', code: 'VALIDATION_ERROR' } }, 400);
@@ -966,8 +967,7 @@ customersRouter.post('/:businessId/find-or-create', async (c) => {
     return c.json({ error: { message: 'Customer not found and insufficient data to create', code: 'NOT_FOUND' } }, 404);
   }
 
-  // Transform to camelCase
-  const transformed = toCamelCase(customer);
+  const transformed = parseCustomerFields(toCamelCase(customer));
   if (customer.loyalty_points) {
     (transformed as Record<string, unknown>).loyaltyPoints = toCamelCase(customer.loyalty_points as Record<string, unknown>);
   }

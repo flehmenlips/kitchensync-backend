@@ -9,24 +9,26 @@ import { ordersRouter } from "./routes/orders";
 import { customersRouter } from "./routes/customers";
 import { analyticsRouter } from "./routes/analytics";
 import { aiRouter } from "./routes/ai";
+import { notificationsRouter } from "./routes/notifications";
 import { logger } from "hono/logger";
+import { requireAuth } from "./middleware/auth";
+import { rateLimiter } from "./middleware/rateLimiter";
 
 const app = new Hono();
 
-// CORS middleware - validates origin against allowlist
 const ALLOWED_ORIGINS = [
   "https://cookbook.farm",
   "https://www.cookbook.farm",
+  "https://cook.farm",
+  "https://www.cook.farm",
   "https://kitchensync-web.vercel.app",
 ];
 
-// Dev patterns with optional port (e.g. http://localhost:5173)
 const devOriginPatterns = [
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/,
 ];
 
-// Vercel preview deployments (e.g. kitchensync-web-xxx.vercel.app)
 const vercelPreviewPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/;
 
 function getDynamicOrigins(): string[] {
@@ -46,7 +48,6 @@ function getDynamicOrigins(): string[] {
 }
 
 function isOriginAllowed(origin: string | null): boolean {
-  // Allow requests with no Origin (e.g. mobile apps, curl, Postman)
   if (!origin) return true;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   if (devOriginPatterns.some((re) => re.test(origin))) return true;
@@ -68,10 +69,43 @@ app.use(
   })
 );
 
-// Logging
 app.use("*", logger());
 
-// Health check endpoint
+// Public routes that bypass auth
+const PUBLIC_PATHS = [
+  /^\/health$/,
+  /^\/api\/sample/,
+  /^\/api\/business\/slug\//,
+  /^\/api\/menu\/[^/]+\/public$/,
+  /^\/api\/reservations\/[^/]+\/availability$/,
+];
+
+function isPublicPath(path: string): boolean {
+  return PUBLIC_PATHS.some((pattern) => pattern.test(path));
+}
+
+// Auth middleware applied to all /api/* routes, skipping public paths
+app.use("/api/*", async (c, next) => {
+  if (isPublicPath(c.req.path)) {
+    return next();
+  }
+  return requireAuth(c, next);
+});
+
+// Rate limit AI endpoints: 10 requests per minute per authenticated user
+app.use(
+  "/api/ai/*",
+  rateLimiter({
+    windowMs: 60 * 1000,
+    limit: 10,
+    keyGenerator: (c: any) => {
+      const user = c.get("user");
+      return user?.id || c.req.header("x-forwarded-for") || "anonymous";
+    },
+  })
+);
+
+// Health check
 app.get("/health", (c) => c.json({ status: "ok", version: "1.0.0" }));
 
 // Routes
@@ -83,6 +117,7 @@ app.route("/api/orders", ordersRouter);
 app.route("/api/customers", customersRouter);
 app.route("/api/analytics", analyticsRouter);
 app.route("/api/ai", aiRouter);
+app.route("/api/notifications", notificationsRouter);
 
 const port = Number(process.env.PORT) || 3000;
 

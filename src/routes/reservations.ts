@@ -9,28 +9,9 @@ import {
   UpdateTableSchema,
   ReservationSettingsSchema,
 } from '../types';
+import { toCamelCase } from '../utils';
 
 export const reservationsRouter = new Hono();
-
-// Helper to convert snake_case to camelCase
-function toCamelCase<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    result[camelKey] = obj[key];
-  }
-  return result;
-}
-
-// Helper to convert camelCase to snake_case
-function toSnakeCase<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-    result[snakeKey] = obj[key];
-  }
-  return result;
-}
 
 // Helper to format table response
 function formatTableResponse(table: Record<string, unknown>) {
@@ -828,12 +809,12 @@ reservationsRouter.put(
       // Prepare update data
       const updateData: Record<string, unknown> = {};
 
-      if (data.customerName) updateData.customer_name = data.customerName;
-      if (data.customerEmail) updateData.customer_email = data.customerEmail;
+      if (data.customerName !== undefined) updateData.customer_name = data.customerName;
+      if (data.customerEmail !== undefined) updateData.customer_email = data.customerEmail;
       if (data.customerPhone !== undefined) updateData.customer_phone = data.customerPhone;
-      if (data.reservationDate) updateData.reservation_date = data.reservationDate;
-      if (data.reservationTime) updateData.reservation_time = data.reservationTime;
-      if (data.partySize) updateData.party_size = data.partySize;
+      if (data.reservationDate !== undefined) updateData.reservation_date = data.reservationDate;
+      if (data.reservationTime !== undefined) updateData.reservation_time = data.reservationTime;
+      if (data.partySize !== undefined) updateData.party_size = data.partySize;
       if (data.tableId !== undefined) updateData.table_id = data.tableId || null;
       if (data.seatingPreference !== undefined) updateData.seating_preference = data.seatingPreference;
       if (data.specialRequests !== undefined) updateData.special_requests = data.specialRequests;
