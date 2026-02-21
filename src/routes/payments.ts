@@ -6,45 +6,52 @@ import type { AuthUser } from '../middleware/auth';
 type Env = { Variables: { user: AuthUser } };
 export const paymentsRouter = new Hono<Env>();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-12-18.acacia' as any,
-});
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error('STRIPE_SECRET_KEY is not configured');
+    _stripe = new Stripe(key, { apiVersion: '2024-12-18.acacia' as any });
+  }
+  return _stripe;
+}
 
 // Create a payment intent for an order
 paymentsRouter.post('/create-payment-intent', async (c) => {
   const user = c.get('user');
   const { amount, currency = 'usd', businessId, orderId, metadata } = await c.req.json();
 
-  if (!amount || amount <= 0) {
-    return c.json({ error: { message: 'Invalid amount', code: 'INVALID_AMOUNT' } }, 400);
-  }
-
-  try {
-    let stripeCustomerId: string | undefined;
-
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('stripe_customer_id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (profile?.stripe_customer_id) {
-      stripeCustomerId = profile.stripe_customer_id;
-    } else {
-      const { data: authUser } = await supabase.auth.admin.getUserById(user.id);
-      const customer = await stripe.customers.create({
-        email: authUser?.user?.email,
-        metadata: { supabase_user_id: user.id },
-      });
-      stripeCustomerId = customer.id;
-
-      await supabase
-        .from('user_profiles')
-        .update({ stripe_customer_id: customer.id })
-        .eq('user_id', user.id);
+    if (!amount || amount <= 0) {
+      return c.json({ error: { message: 'Invalid amount', code: 'INVALID_AMOUNT' } }, 400);
     }
 
-    const paymentIntent = await stripe.paymentIntents.create({
+    try {
+      const stripe = getStripe();
+      let stripeCustomerId: string | undefined;
+
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('stripe_customer_id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (profile?.stripe_customer_id) {
+        stripeCustomerId = profile.stripe_customer_id;
+      } else {
+        const { data: authUser } = await supabase.auth.admin.getUserById(user.id);
+        const customer = await stripe.customers.create({
+          email: authUser?.user?.email,
+          metadata: { supabase_user_id: user.id },
+        });
+        stripeCustomerId = customer.id;
+
+        await supabase
+          .from('user_profiles')
+          .update({ stripe_customer_id: customer.id })
+          .eq('user_id', user.id);
+      }
+
+      const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency,
       customer: stripeCustomerId,
@@ -76,6 +83,7 @@ paymentsRouter.post('/connect/create-account', async (c) => {
   }
 
   try {
+    const stripe = getStripe();
     const { data: business } = await supabase
       .from('business_accounts')
       .select('id, business_name, email, owner_user_id, stripe_account_id')
@@ -131,6 +139,7 @@ paymentsRouter.get('/connect/status/:businessId', async (c) => {
   const businessId = c.req.param('businessId');
 
   try {
+    const stripe = getStripe();
     const { data: business } = await supabase
       .from('business_accounts')
       .select('stripe_account_id')
@@ -161,6 +170,7 @@ paymentsRouter.get('/payment-methods', async (c) => {
   const user = c.get('user');
 
   try {
+    const stripe = getStripe();
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('stripe_customer_id')
