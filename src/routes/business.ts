@@ -642,6 +642,66 @@ businessRouter.post(
   }
 );
 
+const UpdateTeamMemberSchema = z.object({
+  role: z.enum(['owner', 'manager', 'staff', 'accountant', 'marketing']).optional(),
+  status: z.enum(['active', 'inactive', 'on_leave']).optional(),
+});
+
+businessRouter.put(
+  '/:id/team/:memberId',
+  zValidator('json', UpdateTeamMemberSchema),
+  async (c) => {
+    const businessId = c.req.param('id');
+    const memberId = c.req.param('memberId');
+    const updates = c.req.valid('json');
+
+    try {
+      const updateData: Record<string, string> = {};
+      if (updates.role) updateData.role = updates.role;
+      if (updates.status) updateData.status = updates.status;
+
+      const { data: member, error } = await supabase
+        .from('business_team_members')
+        .update(updateData)
+        .eq('id', memberId)
+        .eq('business_id', businessId)
+        .select()
+        .single();
+
+      if (error || !member) {
+        return c.json({ error: { message: 'Team member not found', code: 'NOT_FOUND' } }, 404);
+      }
+
+      return c.json({ data: mapTeamMember(member) });
+    } catch (error) {
+      console.error('Error updating team member:', error);
+      return c.json({ error: { message: 'Failed to update team member', code: 'UPDATE_FAILED' } }, 500);
+    }
+  }
+);
+
+businessRouter.delete('/:id/team/:memberId', async (c) => {
+  const businessId = c.req.param('id');
+  const memberId = c.req.param('memberId');
+
+  try {
+    const { error } = await supabase
+      .from('business_team_members')
+      .delete()
+      .eq('id', memberId)
+      .eq('business_id', businessId);
+
+    if (error) {
+      return c.json({ error: { message: 'Failed to remove team member', code: 'DELETE_FAILED' } }, 500);
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error removing team member:', error);
+    return c.json({ error: { message: 'Failed to remove team member', code: 'DELETE_FAILED' } }, 500);
+  }
+});
+
 const VerifyBusinessSchema = z.object({
   notes: z.string().optional(),
 });
