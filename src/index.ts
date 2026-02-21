@@ -10,6 +10,7 @@ import { customersRouter } from "./routes/customers";
 import { analyticsRouter } from "./routes/analytics";
 import { aiRouter } from "./routes/ai";
 import { notificationsRouter } from "./routes/notifications";
+import { paymentsRouter } from "./routes/payments";
 import { logger } from "hono/logger";
 import { requireAuth } from "./middleware/auth";
 import { rateLimiter } from "./middleware/rateLimiter";
@@ -118,6 +119,7 @@ app.route("/api/customers", customersRouter);
 app.route("/api/analytics", analyticsRouter);
 app.route("/api/ai", aiRouter);
 app.route("/api/notifications", notificationsRouter);
+app.route("/api/payments", paymentsRouter);
 
 const port = Number(process.env.PORT) || 3000;
 
